@@ -1,0 +1,21 @@
+* ota5_nmos_22n.qsch
+M2 out N05 N03 0 NMOS l=M1_L w=M1_W NMOS
+M4 out N01 N02 N02 PMOS l=M3_L w=M3_W PMOS
+M1 N01 in N03 0 NMOS l=M1_L w=M1_W NMOS
+M3 N01 N01 N02 N02 PMOS l=M3_L w=M3_W PMOS
+M5 N03 N04 0 0 NMOS l=M5_L w=M6_W*M5_WM NMOS
+V1 N02 0 V=0.8
+M6 N04 N04 0 0 NMOS l=M5_L w=M6_W NMOS
+I1 N02 N04 I=5µ
+V2 N05 0 V=0.4
+V3 in N05 AC=0.1
+C1 out 0 C=1p
+.meas gain max dB(V(out)/V(in))
+.meas cur param I(V1)
+.ac dec 20 0 10G
+.meas gx find frequency when mag(v(out)/v(in))=1
+//.op
+.param M1_L=5.981877353713791e-07 M3_L=4.175905474766553e-07 M5_L=4.770759299314102e-07 M1_W=2.67251953367185e-06 M3_W=2.688005456780285e-05 M6_W=4.746797798424305e-05 M5_WM=5.0
+.meas phs find phase(v(out)/v(in)) when mag(v(out)/v(in))=1
+.lib C:\Users\matthewchansi\Downloads\cmos\cmos_22nm_HP.txt
+.end

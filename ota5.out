@@ -1,0 +1,6 @@
+.meas a max db(v(out)/v(in)):
+     (   38.0687,   27.2857)
+.meas pow param i(v1):
+     (1.97749e-08,4.61279e-09)
+.meas gx find frequency when mag(v(out)/v(in))=1:
+     (    384688,         0)
