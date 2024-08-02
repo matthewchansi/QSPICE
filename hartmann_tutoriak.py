@@ -398,9 +398,8 @@ def doTrials(params):
     
 torch.set_default_dtype(torch.float64)
 
-N_SOBOL = 256
-N_MACE = 1
-N_TOTAL = N_SOBOL + N_MACE
+N_SOBOL = 1024
+N_MACE = 1024
 trial = 0
 
 SG = SobolGenerator(paramlist)   
@@ -409,8 +408,8 @@ tx = torch.tensor([[]])
 ty = torch.tensor([[]])
 
 const = {1: [-95, -0.01], 2:[45000000, None]}
-
-while trial < N_SOBOL:
+bt = None
+while trial < N_SOBOL or (trial > 512 and bt is not None):
     nx = SG.genValues()
     nx = convertType(nx, paramlist)
     #print(nx)
@@ -430,13 +429,12 @@ while trial < N_SOBOL:
     print("trial: ", trial, bt)
     print(nx, ny)
     #print(nx, ny)
-    appendToResults("res1.txt", "0" + "\n")
-    
     trial += 1
-    if bt is not None and trial > 512:
-        
+    
+    if bt is not None:
         appendToResults("res1.txt", " ".join([str(i.item()) for i in bt[1]]) + "\n")
-        break
+    else:
+        appendToResults("res1.txt", "0" + "\n")
 
 #print(tx)
 #print(ty)
@@ -456,8 +454,7 @@ pt = ScalarizedPosteriorTransform(torch.cat([torch.tensor([1],
     dtype=torch.float32), torch.zeros(NUM_OUTPUTS-1, dtype=torch.float32)]))
 
 print("MACE TIME.")
-while trial < 100:
-
+while trial < N_SOBOL + N_MACE:
     st0 = time.time()
     mll, gp  = update_model(tx, ty, old_model=gp)
 
