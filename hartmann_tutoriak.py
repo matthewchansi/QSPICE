@@ -122,24 +122,6 @@ class EnsembleAcquisitionFunction(AnalyticAcquisitionFunction):
         #print(Phi(u).shape)
         o = torch.stack((sigma * _ei_helper(u), Phi(u), (mean if self.maximize else -mean) + self.beta.sqrt() * sigma))
         return o
-    
-class MyProblem(Problem):
-    def __init__(self, n_var,
-                 objs, const_fn, **kwargs):
-        self.objs = objs
-        self.const_fn = const_fn
-        self.cnt = 0
-        super().__init__(n_var=n_var, n_obj=len(objs), **kwargs)
-
-    def _evaluate(self, x, out, *args, **kwargs):
-        #print(x.shape)
-        xt = torch.from_numpy(np.float32(np.expand_dims(x, axis=1)))
-        #print(xt.shape)
-        #print(xt.shape)
-        const_mul = self.const_fn(xt)
-        o = [torch.mul(obj(xt), const_mul).detach().numpy() for obj in self.objs]
-        # o = o + [(-1 * const_mul).detach().numpy()]
-        out["F"] = np.array(o)
 
 class MyProblemEnsemble(Problem):
     def __init__(self, n_var, n_obj,
@@ -152,12 +134,7 @@ class MyProblemEnsemble(Problem):
         xt = torch.from_numpy(np.float32(np.expand_dims(x, axis=1)))
         const_mul = self.const_fn(xt)
         o = self.my_fn(xt) 
-        #o = self.my_fn(xt) * const_mul
-        #o = [torch.mul(obj(xt), const_mul).detach().numpy() for obj in self.objs]
-        # o = o + [(-1 * const_mul).detach().numpy()]
-        #print(const_mul.shape)
-        #print(xt.shape)
-        #print(o.shape)
+
         o = o * const_mul * -1
         z = o.detach().numpy().T
         #print(z.shape)
@@ -244,22 +221,13 @@ def update_model(train_x, train_y, old_model=None):
                          outcome_transform=Standardize(m=train_Y_dim)
                          )
     mll = ExactMarginalLogLikelihood(model.likelihood, model)
-    #print(len(model.train_inputs))
-    #print(model.train_inputs[0].shape)
-    #print(np.array(model.train_inputs[0]).shape)
-    #exit()
+
     if old_model is not None:
         print("loading state dict")
         model.load_state_dict(old_model.state_dict())
 
     fit_gpytorch_mll(mll)
-    #print(len(model.train_inputs))
-    #print(model.train_inputs[0].shape)
-    print(train_x.shape)
-    print(model.mean_module(train_x).shape)
-    print(model.covar_module(train_x).shape)
-    model(train_x)
-    exit()
+    
     return mll, model
 
 def update_data(train_x, train_y, new_x=None, new_y=None):
@@ -289,27 +257,6 @@ def getBeta(iters = 4, dims = 7):
     delta = 0.05
     beta = math.sqrt(2 * v * math.log(pow(t, d/2 + 2) * pow(math.pi, 2) / (3 * delta)))
     return beta
-
-def doMace(gp, max_y, lb, ub, const, randseed = 1):
-    
-    pt = ScalarizedPosteriorTransform(torch.cat([torch.tensor([1],
-        dtype=torch.float32), torch.zeros(gp.num_outputs -1, dtype=torch.float32)]))
-    # max_y = max(ty[0])
-    UCB = UpperConfidenceBound(gp, beta = getBeta(dims = len(ub)), posterior_transform=pt)
-    PI = ProbabilityOfImprovement(gp, best_f=max_y, posterior_transform=pt)
-    EI = ExpectedImprovement(gp, best_f=max_y, posterior_transform=pt)
-    PF = ProbabilityOfFeasibility(gp, objective_index=0, constraints=const) # index, lower bound, upper bound.
-    #CEI = ConstrainedExpectedImprovement(gp, best_f=max_y, objective_index=0, constraints=const) # index, lower bound, upper bound.
-
-    obs = [lambda x: -1 * UCB(x), lambda x: -1 * PI(x), lambda x: -1 * EI(x)]
-
-    problem = MyProblem(len(lb), obs, const_fn=PF, xl=lb, xu=ub)
-
-    algorithm = NSGA2(pop_size=100)
-
-    res = minimize(problem, algorithm, ('n_gen', 200), verbose=True, seed=randseed)
-    return res
-
 
 def fetchValue(out_st, my_v):
     pfx = ".meas "
@@ -372,7 +319,6 @@ STR_SIMULATE = "QSPICE64 -binary {}.cir".format(FNAME)
 STR_MEASURE = "QPOST {}.cir -o {}.out".format(FNAME, FNAME)
 STR_OUTFILE = "{}.out".format(FNAME)
 STR_NETFILE = "{}.cir".format(FNAME)
-#print(STR_MEASURE)
 
 subprocess.run(STR_NETLIST.split(" "), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 og_netlist = readFile(STR_NETFILE)
