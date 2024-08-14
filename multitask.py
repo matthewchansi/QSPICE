@@ -29,6 +29,8 @@ from gpytorch.constraints import GreaterThan
 from botorch.models.transforms.outcome import Standardize
 from botorch.models.transforms.input import Normalize
 
+from botorch.models.gpytorch import GPyTorchModel
+
 data_dim = train_x.size(-1)
 
 class LargeFeatureExtractor(torch.nn.Sequential):
@@ -42,23 +44,15 @@ class LargeFeatureExtractor(torch.nn.Sequential):
         self.add_module('relu3', torch.nn.ReLU())
         self.add_module('linear4', torch.nn.Linear(50, 2))
 
-#feature_extractor = LargeFeatureExtractor()
-
-# DKL https://arxiv.org/pdf/1511.02222
-# https://docs.gpytorch.ai/en/stable/examples/06_PyTorch_NN_Integration_DKL/KISSGP_Deep_Kernel_Regression_CUDA.html
-# https://docs.gpytorch.ai/en/stable/examples/03_Multitask_Exact_GPs/Batch_Independent_Multioutput_GP.html
-
-class BatchIndependentMultitaskGPModel(gpytorch.models.ExactGP):
+class MultitaskGPModel(gpytorch.models.ExactGP, GPyTorchModel):
     def __init__(self, train_x, train_y, likelihood):
-        super().__init__(train_x, train_y, likelihood)
-        batchsize = torch.Size([train_y.shape[-1]])
-
-        self.mean_module = gpytorch.means.ConstantMean(batch_shape=batchsize)
-        self.covar_module = gpytorch.kernels.ScaleKernel(
-            gpytorch.kernels.RBFKernel(batch_shape=batchsize),
-            batch_shape=batchsize
+        super(MultitaskGPModel, self).__init__(train_x, train_y, likelihood)
+        self.mean_module = gpytorch.means.MultitaskMean(
+            gpytorch.means.ConstantMean(), num_tasks=2
         )
-
+        self.covar_module = gpytorch.kernels.MultitaskKernel(
+            gpytorch.kernels.RBFKernel(), num_tasks=2, rank=1
+        )
         self.feature_extractor = LargeFeatureExtractor()
         self.scale_to_bounds = gpytorch.utils.grid.ScaleToBounds(-1., 1.)
 
@@ -68,30 +62,26 @@ class BatchIndependentMultitaskGPModel(gpytorch.models.ExactGP):
 
         mean_x = self.mean_module(projected_x)
         covar_x = self.covar_module(projected_x)
-
-        return gpytorch.distributions.MultitaskMultivariateNormal.from_batch_mvn(
-            gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
-        )
+        return gpytorch.distributions.MultitaskMultivariateNormal(mean_x, covar_x)
 
 
-likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks=2).cuda()
-model = BatchIndependentMultitaskGPModel(train_x, train_y, likelihood).cuda()
+likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks=2)
+model = MultitaskGPModel(train_x, train_y, likelihood)
 
 training_iterations = 500
+
 
 # Find optimal model hyperparameters
 model.train()
 likelihood.train()
 
+# Use the adam optimizer
 optimizer = torch.optim.Adam([
     {'params': model.feature_extractor.parameters()},
     {'params': model.covar_module.parameters()},
     {'params': model.mean_module.parameters()},
     {'params': model.likelihood.parameters()},
 ], lr=0.01)
-
-# Use the adam optimizer
-# optimizer = torch.optim.Adam(model.parameters(), lr=0.1)  # Includes GaussianLikelihood parameters
 
 # "Loss" for GPs - the marginal log likelihood
 mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
@@ -101,13 +91,12 @@ for i in range(training_iterations):
     output = model(train_x)
     loss = -mll(output, train_y)
     loss.backward()
-
-    if (i % 100 == 100-1):
+    if (i % 20 == 20-1):
         print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, loss.item()))
-    
-    #print('Iter %d/%d - Loss: %.3f' % (i + 1, training_iterations, loss.item()))
     optimizer.step()
-
+# This contains predictions for both tasks, flattened out
+# The first half of the predictions is for the first task
+# The second half is for the second task
 model.eval()
 likelihood.eval()
 
@@ -116,13 +105,10 @@ f, (y1_ax, y2_ax) = plt.subplots(1, 2, figsize=(8, 3))
 
 # Make predictions
 with torch.no_grad(), gpytorch.settings.fast_pred_var():
+    #test_x = torch.linspace(0, 1, 51)
     predictions = likelihood(model(test_x))
     mean = predictions.mean
     lower, upper = predictions.confidence_region()
-
-# This contains predictions for both tasks, flattened out
-# The first half of the predictions is for the first task
-# The second half is for the second task
 
 train_y = train_y.cpu()
 train_x = train_x.cpu()
@@ -151,5 +137,5 @@ y2_ax.plot(test_x[:, 1].detach().numpy(), upper[:, 1].detach().numpy(), 'r.')
 
 y2_ax.legend(['Observed Data', 'Mean', 'lowerconfidence', 'upperconfidence'])
 y2_ax.set_title('Observed Values (Likelihood)')
-plt.savefig("multioutputgp.jpg")
+plt.savefig("multitaskgp_1.jpg")
 plt.show()
