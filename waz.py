@@ -14,6 +14,7 @@ f = [0] * (1500 - len(z))
 f += z
 
 print(len(f))
+
 # make data
 # plot
 
@@ -26,5 +27,9 @@ ax.axvline(x=1000, color="r")
 ax.tick_params(axis = "both")
 ax.set_yticks([i * 5 for i in range(0, 10)])
 ax.set_xticks([i * 250 for i in range(0, 7)])
-ax.set_title("optimization for open-loop gain in 22n ota-5")
+ax.set_title("C(L)EI? optimization for open-loop gain in 22n ota-5\n pm > 85 gx > 45M")
+
+ax.set_ylim([0, 45])
+ax.set_xlim([0, 1500])
+plt.savefig("waz.png")
 plt.show()

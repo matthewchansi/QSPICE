@@ -1,0 +1,65 @@
+[
+    {
+        "name": "M1_L",
+        "type": "range",
+        "value_type": "float",
+        "bounds": [
+            2.2e-08,
+            1e-06
+        ]
+    },
+    {
+        "name": "M3_L",
+        "type": "range",
+        "value_type": "float",
+        "bounds": [
+            2.2e-08,
+            1e-06
+        ]
+    },
+    {
+        "name": "M5_L",
+        "type": "range",
+        "value_type": "float",
+        "bounds": [
+            2.2e-08,
+            5e-06
+        ]
+    },
+    {
+        "name": "M1_W",
+        "type": "range",
+        "value_type": "float",
+        "bounds": [
+            4.4e-08,
+            5e-05
+        ]
+    },
+    {
+        "name": "M3_W",
+        "type": "range",
+        "value_type": "float",
+        "bounds": [
+            4.4e-08,
+            5e-05
+        ]
+    },
+    {
+        "name": "M6_W",
+        "type": "range",
+        "value_type": "float",
+        "bounds": [
+            4.4e-08,
+            5e-05
+        ]
+    },
+    {
+        "name": "M5_WM",
+        "type": "range",
+        "value_type": "int",
+        "bounds": [
+            1,
+            20
+        ]
+    }
+]

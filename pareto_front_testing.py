@@ -11,12 +11,12 @@ from botorch.models import SingleTaskGP
 from botorch.fit import fit_gpytorch_mll
 import torch
 from botorch.acquisition.analytic import UpperConfidenceBound, ExpectedImprovement, ProbabilityOfImprovement
-import plotly.io as pio
+#import plotly.io as pio
 
 # Ax uses Plotly to produce interactive plots. These are great for viewing and analysis,
 # though they also lead to large file sizes, which is not ideal for files living in GH.
 # Changing the default to `png` strips the interactive components to get around this.
-pio.renderers.default = "png"
+#pio.renderers.default = "png"
 
 # from botorch.acquisition.monte_carlo import MCAcquisitionFunction
 
@@ -65,28 +65,6 @@ class qScalarizedUpperConfidenceBound(MCAcquisitionFunction):
         return ucb_samples.max(dim=-1)[0].mean(dim=0)
     '''
 
-
-X_SZ = 8
-# generate synthetic data
-X = torch.rand(40, X_SZ)
-# print()
-ub = torch.max(X, 0).values.detach().numpy()
-lb = torch.min(X, 0).values.detach().numpy()
-# torch.stack([torch.sin(X[:, 0]), torch.cos(X[:, 1])], -1)
-Y = torch.sin(X).sum(dim=1, keepdim=True)
-Y = standardize(Y)  # standardize to zero mean unit variance
-
-gp = SingleTaskGP(X, Y)
-mll = ExactMarginalLogLikelihood(gp.likelihood, gp)
-fit_gpytorch_mll(mll)
-
-UCB = UpperConfidenceBound(gp, beta=0.1)
-PI = ProbabilityOfImprovement(gp, best_f=max(Y))
-EI = ExpectedImprovement(gp, best_f=max(Y))
-
-obs = [lambda x: -1 * UCB(x), lambda x: -1 * EI(x), lambda x: -1 * PI(x)]
-
-
 class MyFunctionalProblem(FunctionalProblem):
 
     # minimize LCB(x), −PI(x), −EI(x).
@@ -116,32 +94,55 @@ class MyProblem(Problem):
         # print(xt)
         out["F"] = np.array([obj(xt).detach().numpy() for obj in self.objs])
 
+if __name__ == "__main__":
+    
 
-problem = MyProblem(X_SZ, obs, xl=lb, xu=ub)
+    X_SZ = 8
+    # generate synthetic data
+    X = torch.rand(40, X_SZ)
+    # print()
+    ub = torch.max(X, 0).values.detach().numpy()
+    lb = torch.min(X, 0).values.detach().numpy()
+    # torch.stack([torch.sin(X[:, 0]), torch.cos(X[:, 1])], -1)
+    Y = torch.sin(X).sum(dim=1, keepdim=True)
+    Y = standardize(Y)  # standardize to zero mean unit variance
 
-algorithm = NSGA2(pop_size=100)
+    gp = SingleTaskGP(X, Y)
+    mll = ExactMarginalLogLikelihood(gp.likelihood, gp)
+    fit_gpytorch_mll(mll)
 
-st = time.time()
+    UCB = UpperConfidenceBound(gp, beta=0.1)
+    PI = ProbabilityOfImprovement(gp, best_f=max(Y))
+    EI = ExpectedImprovement(gp, best_f=max(Y))
 
-res = minimize(problem,
-               algorithm,
-               ('n_gen', 400),
-               seed=1,
-               verbose=False)
-
-st2 = time.time()
+    obs = [lambda x: -1 * UCB(x), lambda x: -1 * EI(x), lambda x: -1 * PI(x)]
 
 
-# print(res)
-print(f"time nsga2: {st2-st}")
+    problem = MyProblem(X_SZ, obs, xl=lb, xu=ub)
 
-# fig, axs = plt.subplots()
+    algorithm = NSGA2(pop_size=100)
 
-print(f"pareto set size: {len(res.F)}")
-print(res.X)
-# print(res.pf)
-# print(res.pop)
+    st = time.time()
 
-plot = Scatter()
-plot.add(res.F, facecolor="green", edgecolor="red")
-plot.show()
+    res = minimize(problem,
+                algorithm,
+                ('n_gen', 400),
+                seed=1,
+                verbose=False)
+
+    st2 = time.time()
+
+
+    # print(res)
+    print(f"time nsga2: {st2-st}")
+
+    # fig, axs = plt.subplots()
+
+    print(f"pareto set size: {len(res.F)}")
+    print(res.X)
+    # print(res.pf)
+    # print(res.pop)
+
+    plot = Scatter()
+    plot.add(res.F, facecolor="green", edgecolor="red")
+    plot.show()

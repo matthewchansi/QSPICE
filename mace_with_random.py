@@ -16,8 +16,7 @@ import torch
 from torch import Tensor
 from botorch.acquisition.analytic import (UpperConfidenceBound, ExpectedImprovement, 
     ProbabilityOfImprovement, AnalyticAcquisitionFunction, _compute_log_prob_feas, 
-    _preprocess_constraint_bounds, convert_to_target_pre_hook, LogConstrainedExpectedImprovement, ConstrainedExpectedImprovement, 
-    _scaled_improvement, _ei_helper)
+    _preprocess_constraint_bounds, convert_to_target_pre_hook, LogConstrainedExpectedImprovement, ConstrainedExpectedImprovement)
 # import plotly.io as pio
 from botorch.models.model import Model
 from botorch.utils import t_batch_mode_transform
@@ -26,11 +25,14 @@ from botorch.posteriors.gpytorch import GPyTorchPosterior
 from botorch.posteriors.posterior_list import PosteriorList  # pragma: no cover
 from gpytorch.distributions import MultitaskMultivariateNormal, MultivariateNormal
 from botorch.sampling.normal import SobolQMCNormalSampler
-from botorch.utils.probability.utils import (
-    ndtr as Phi,
-)
+
 from botorch.models.transforms.outcome import Standardize
 from botorch.models.transforms.input import Normalize
+MUL = 1E9
+
+#print(torch.cuda.is_available())
+
+# torch.set_default_device('cuda')
 
 class ProbabilityOfFeasibility(AnalyticAcquisitionFunction):
     r"""Probability of Feasibility.
@@ -74,111 +76,135 @@ class ProbabilityOfFeasibility(AnalyticAcquisitionFunction):
         log_prob_feas = _compute_log_prob_feas(self, means=means, sigmas=sigmas)
         return log_prob_feas.exp()
     
-class EnsembleAcquisitionFunction(AnalyticAcquisitionFunction):
-    def __init__(
-        self,
-        model: Model,
-        best_f: Union[float, Tensor],
-        beta: Union[float, Tensor],
-        posterior_transform: Optional[PosteriorTransform] = None,
-        maximize: bool = True,
-    ):
-        r"""Single-outcome Expected Improvement (analytic).
 
+class SelectPosteriorTransform(PosteriorTransform):
+    r"""A posterior transform.
+        It seems that using scalarize with 1 to select the correct outcome 
+        is faster...
+    """
+
+    def __init__(self, outcome_index: float=0) -> None:
+        r"""
         Args:
-            model: A fitted single-outcome model.
-            best_f: Either a scalar or a `b`-dim Tensor (batch mode) representing
-                the best function value observed so far (assumed noiseless).
-            posterior_transform: A PosteriorTransform. If using a multi-output model,
-                a PosteriorTransform that transforms the multi-output posterior into a
-                single-output posterior is required.
-            maximize: If True, consider the problem a maximization problem.
-            All sourced from:
-            https://github.com/pytorch/botorch/blob/3f5fcd690d26b5930fe3b93f21144d7edb0318b2/botorch/acquisition/analytic.py#L35
         """
-        #legacy_ei_numerics_warning(legacy_name=type(self).__name__)
-        super().__init__(model=model, posterior_transform=posterior_transform)
-        self.register_buffer("best_f", torch.as_tensor(best_f))
-        self.register_buffer("beta", torch.as_tensor(beta))
-        self.maximize = maximize
+        super().__init__()
+        self.outcome_index = outcome_index
 
-    @t_batch_mode_transform(expected_q=1, assert_output_shape=False)
-    def forward(self, X: Tensor) -> Tensor:
-        r"""Evaluate Expected Improvement on the candidate set X.
+    def evaluate(self, Y: Tensor) -> Tensor:
+        pass
 
-        Args:
-            X: A `(b1 x ... bk) x 1 x d`-dim batched tensor of `d`-dim design points.
-                Expected Improvement is computed for each point individually,
-                i.e., what is considered are the marginal posteriors, not the
-                joint.
+    def forward(
+        self, posterior: Union[GPyTorchPosterior, PosteriorList]
+    ) -> GPyTorchPosterior:
+        
+        mean = posterior.mean
+        mvn = posterior.distribution
+        cov = mvn.lazy_covariance_matrix if mvn.islazy else mvn.covariance_matrix
 
-        Returns:
-            A `(b1 x ... bk)`-dim tensor of Expected Improvement values at the
-            given design points `X`.
-        """
-        #print(X.shape)
-        mean, sigma = self._mean_and_sigma(X)
-        u = _scaled_improvement(mean, sigma, self.best_f, self.maximize)
-        #print(Phi(u).shape)
-        o = torch.stack((sigma * _ei_helper(u), Phi(u), (mean if self.maximize else -mean) + self.beta.sqrt() * sigma))
-        return o
+        new_mean = mean[:, :, self.outcome_index]
+        new_cov = cov[:, self.outcome_index, self.outcome_index].unsqueeze(1).unsqueeze(1)
+        return MultivariateNormal(new_mean, new_cov)
     
 class MyProblem(Problem):
     def __init__(self, n_var,
                  objs, const_fn, **kwargs):
         self.objs = objs
         self.const_fn = const_fn
-        self.cnt = 0
         super().__init__(n_var=n_var, n_obj=len(objs), **kwargs)
 
     def _evaluate(self, x, out, *args, **kwargs):
         #print(x.shape)
         xt = torch.from_numpy(np.float32(np.expand_dims(x, axis=1)))
         #print(xt.shape)
-        #print(xt.shape)
         const_mul = self.const_fn(xt)
-        o = [torch.mul(obj(xt), const_mul).detach().numpy() for obj in self.objs]
-        # o = o + [(-1 * const_mul).detach().numpy()]
-        out["F"] = np.array(o)
+        out["F"] = np.array([torch.mul(obj(xt), const_mul).detach().numpy() for obj in self.objs])
 
-class MyProblemEnsemble(Problem):
-    def __init__(self, n_var, n_obj,
-                 my_fn, const_fn, **kwargs):
-        self.my_fn = my_fn
-        self.const_fn = const_fn
-        super().__init__(n_var=n_var, n_obj=n_obj, **kwargs)
+class MyProblem2(Problem):
+    def __init__(self, n_var,
+                 objs, ei, cei, **kwargs):
+        self.objs = objs
+        self.ei = ei
+        self.cei = cei
+        self.cnt = 0
+        super().__init__(n_var=n_var, n_obj=len(objs)+1, **kwargs)
 
     def _evaluate(self, x, out, *args, **kwargs):
+        #print(x.shape)
         xt = torch.from_numpy(np.float32(np.expand_dims(x, axis=1)))
-        const_mul = self.const_fn(xt)
-        o = self.my_fn(xt) 
-        #o = self.my_fn(xt) * const_mul
-        #o = [torch.mul(obj(xt), const_mul).detach().numpy() for obj in self.objs]
-        # o = o + [(-1 * const_mul).detach().numpy()]
-        #print(const_mul.shape)
+        #print(x.shape)
+        my_cei = self.cei(xt)
+        my_ei = self.ei(xt)
+        const_mul = torch.div(my_cei, my_ei)
+
+        o = [(-1 * my_cei).detach().numpy()]
         #print(xt.shape)
-        #print(o.shape)
-        o = o * const_mul * -1
-        z = o.detach().numpy().T
-        #print(z.shape)
-        out["F"] = z
+        #const_mul = self.const_fn(xt)
+        o = o + [torch.mul(obj(xt), const_mul).detach().numpy() for obj in self.objs]
 
-def doMaceEnsemble(gp, max_y, lb, ub, const, randseed = 1):
-    
-    pt = ScalarizedPosteriorTransform(torch.cat([torch.tensor([1],
-        dtype=torch.float32), torch.zeros(gp.num_outputs -1, dtype=torch.float32)]))
-    PF = ProbabilityOfFeasibility(gp, objective_index=0, constraints=const) # index, lower bound, upper bound.
-    ensemble = EnsembleAcquisitionFunction(gp, best_f=max_y, beta = getBeta(dims = len(ub)), posterior_transform=pt)
-    problem = MyProblemEnsemble(len(lb), 3, ensemble, PF, xl=lb, xu=ub)
-
-    algorithm = NSGA2(pop_size=100)
-
-    res = minimize(problem, algorithm, ('n_gen', 200), verbose=True, seed=randseed)
-    return res
+        out["F"] = np.array(o).T
+        #print(self.cnt, end = " ")
+        if (self.cnt % 20 == 0):
+            print(self.cnt, end = " ")
+        self.cnt = self.cnt + 1
+        #print(out["F"].shape)
 
 def selectRandSamples(batch, batchsz):
     B = torch.randperm(len(batch))
     return batch[B[:batchsz]]
+
+#p = Scatter()
+#p.add(res.F, facecolor="red", edgecolor="none")
+#p.show()
+
+paramlist = [
+    {
+        "name": "M1_L",
+        "type": "range",
+        "value_type": "float",
+        "bounds": [2.2E-8, 1E-6],
+    },
+    {
+        "name": "M3_L",
+        "type": "range",
+        "value_type": "float",
+        "bounds": [2.2E-8, 1E-6],
+    },
+    {
+        "name": "M5_L",
+        "type": "range",
+        "value_type": "float",
+        "bounds": [2.2E-8, 1E-6],
+    },
+    {
+        "name": "M1_W",
+        "type": "range",
+        "value_type": "float",
+        "bounds": [4.4E-8, 50E-6],
+    },
+    {
+        "name": "M3_W",
+        "type": "range",
+        "value_type": "float",
+        "bounds": [4.4E-8, 50E-6],
+    },
+    {
+        "name": "M6_W",
+        "type": "range",
+        "value_type": "float",
+        "bounds": [4.4E-8, 50E-6],
+    },
+    {
+        "name": "M5_WM",
+        "type": "range",
+        "value_type": "int",
+        "bounds": [1, 20],
+    }
+]
+
+for i in paramlist:
+    if "value_type" not in i or i["value_type"] == "float":
+        t = i["bounds"]
+        i["bounds"] = [j * MUL for j in t]
 
 def listToParams(val_list, param_list):
     o = {}
@@ -199,9 +225,10 @@ def convertType(val_list, param_list):
                 val_list[:, i] = torch.round(val_list[:, i])
         return val_list
 
+randseed=1
 
 class SobolGenerator():
-    def __init__(self, param_list, randseed = 1):
+    def __init__(self, param_list):
         self.param_list = param_list
         self.setBounds()
         self.soboleng = torch.quasirandom.SobolEngine(dimension=len(param_list), seed=randseed)
@@ -237,29 +264,17 @@ class SobolGenerator():
 
 def update_model(train_x, train_y, old_model=None):
     train_X_dim = train_x.shape[-1]
-    train_Y_dim = train_y.shape[-1]
+    train_y_dim = train_y.shape[-1]
     model = SingleTaskGP(train_X=train_x, 
                          train_Y=train_y,#standardize(train_y),
                          input_transform=Normalize(d=train_X_dim),
-                         outcome_transform=Standardize(m=train_Y_dim)
+                         outcome_transform=Standardize(m=train_y_dim)
                          )
+    
     mll = ExactMarginalLogLikelihood(model.likelihood, model)
-    #print(len(model.train_inputs))
-    #print(model.train_inputs[0].shape)
-    #print(np.array(model.train_inputs[0]).shape)
-    #exit()
-    if old_model is not None:
-        print("loading state dict")
+    if old_model is not None and old_model.state_dict() is not None:
         model.load_state_dict(old_model.state_dict())
-
     fit_gpytorch_mll(mll)
-    #print(len(model.train_inputs))
-    #print(model.train_inputs[0].shape)
-    print(train_x.shape)
-    print(model.mean_module(train_x).shape)
-    print(model.covar_module(train_x).shape)
-    model(train_x)
-    exit()
     return mll, model
 
 def update_data(train_x, train_y, new_x=None, new_y=None):
@@ -277,39 +292,27 @@ def update_data(train_x, train_y, new_x=None, new_y=None):
             new_x = new_x.unsqueeze(-2)
         if new_y.dim() == 1:
             new_y = new_y.unsqueeze(-2)
-        #print(train_x.get_device(), new_x.get_device())
-        train_x = torch.cat([train_x, new_x.to(train_x)])
-        train_y = torch.cat([train_y, new_y.to(train_y)])
+        print(train_x.get_device(), new_x.get_device())
+        train_x = torch.cat([train_x, new_x])
+        train_y = torch.cat([train_y, new_y])
     return train_x, train_y
 
-def getBeta(iters = 4, dims = 7):
-    t = iters
-    d = dims 
-    v = 0.5
-    delta = 0.05
-    beta = math.sqrt(2 * v * math.log(pow(t, d/2 + 2) * pow(math.pi, 2) / (3 * delta)))
-    return beta
-
-def doMace(gp, max_y, lb, ub, const, randseed = 1):
-    
-    pt = ScalarizedPosteriorTransform(torch.cat([torch.tensor([1],
-        dtype=torch.float32), torch.zeros(gp.num_outputs -1, dtype=torch.float32)]))
+def doMace(gp, pt, max_y, lb, ub, const):
     # max_y = max(ty[0])
-    UCB = UpperConfidenceBound(gp, beta = getBeta(dims = len(ub)), posterior_transform=pt)
+    UCB = UpperConfidenceBound(gp, beta=0.1, posterior_transform=pt)
     PI = ProbabilityOfImprovement(gp, best_f=max_y, posterior_transform=pt)
     EI = ExpectedImprovement(gp, best_f=max_y, posterior_transform=pt)
-    PF = ProbabilityOfFeasibility(gp, objective_index=0, constraints=const) # index, lower bound, upper bound.
-    #CEI = ConstrainedExpectedImprovement(gp, best_f=max_y, objective_index=0, constraints=const) # index, lower bound, upper bound.
+    #PF = ProbabilityOfFeasibility(gp, objective_index=0, constraints=const) # index, lower bound, upper bound.
+    CEI = ConstrainedExpectedImprovement(gp, best_f=max_y, objective_index=0, constraints=const) # index, lower bound, upper bound.
 
-    obs = [lambda x: -1 * UCB(x), lambda x: -1 * PI(x), lambda x: -1 * EI(x)]
+    obs = [lambda x: -1 * UCB(x), lambda x: -1 * PI(x)]
 
-    problem = MyProblem(len(lb), obs, const_fn=PF, xl=lb, xu=ub)
+    problem = MyProblem2(len(pl), obs, EI, CEI, xl=lb, xu=ub)
 
-    algorithm = NSGA2(pop_size=100)
+    algorithm = NSGA2(pop_size=200)
 
-    res = minimize(problem, algorithm, ('n_gen', 200), verbose=True, seed=randseed)
+    res = minimize(problem, algorithm, ('n_gen', 200), verbose=False, seed=randseed)
     return res
-
 
 def fetchValue(out_st, my_v):
     pfx = ".meas "
@@ -382,7 +385,7 @@ def getBestTrial(_tx, _ty, _const):
     #print(_tx)
     old_shape_x = _tx.shape
     old_shape_y = _ty.shape
-    _filter = torch.ones(len(_tx), dtype=torch.bool, device=_tx.get_device())
+    _filter = torch.ones(len(_tx), dtype=torch.bool)
     for i in _const:
         # apply upper, lower bounds to each const.
         # if the bound is none, don't apply the bound.
@@ -405,11 +408,11 @@ def getBestTrial(_tx, _ty, _const):
     #print(best)
     return best
 
-def doTrials(params, mul=1E9):
+def doTrials(params):
     #print(params)
     for i in params:
         if i != "M5_WM":
-            params[i] = params[i] / mul
+            params[i] = params[i] / MUL
         params[i] = params[i].item()
     
     
@@ -428,7 +431,106 @@ def doTrials(params, mul=1E9):
 
     if gain == None or math.isnan(gain): gain = 0
     if gx == None or math.isnan(gx): gx = 0
-    if phs == None or math.isnan(phs): phs = -180
+    if phs == None or math.isnan(phs): phs = 180
     return torch.tensor([gain, phs, gx])
-
+    
 torch.set_default_dtype(torch.float64)
+
+N_SOBOL = 512
+N_MACE = 512
+for rs in range(2, 6):
+    randseed = rs
+    trial = 0
+
+    SG = SobolGenerator(paramlist)   
+
+    tx = torch.tensor([[]])
+    ty = torch.tensor([[]])
+
+    const = {1: [-95, -0.01], 2:[45000000, None]}
+    bt = None
+
+    '''
+    while trial < N_SOBOL:
+        nx = SG.genValues()
+        nx = convertType(nx, paramlist)
+        #print(nx)
+        nx_dict = listToParams(nx, paramlist)
+        #nx = nx.unsqueeze(-2)
+        ny = doTrials(nx_dict)
+
+        tx, ty = update_data(tx, ty, new_x = nx, new_y = ny)
+        # mll, gp  = update_model(tx, ty, old_model=cur_model)
+        #print(tx, ty)
+        bt = getBestTrial(tx, ty, const)
+        print("SOBOL trial: ", trial, bt)
+        print(nx, ny)
+        #print(nx, ny)
+        trial += 1
+        
+        if bt is not None:        
+            appendToResults(f"res_{rs}.txt", " ".join([str(i.item()) for i in bt[0]] + [str(i.item()) for i in bt[1]]) + "\n")
+        else:
+            appendToResults(f"res_{rs}.txt", "0" + "\n")
+    '''
+    #fin = trial
+    trial = N_SOBOL
+    fin = N_SOBOL
+    #torch.save(tx, f"tx_{rs}_{N_SOBOL}.pt")
+    #torch.save(ty, f"tx_{rs}_{N_SOBOL}.pt")
+    tx = torch.load(f"tx_{N_SOBOL}.pt")
+    ty = torch.load(f"ty_{N_SOBOL}.pt")
+    #torch.cuda.empty_cache()
+    tx = tx#.cuda()
+    ty = ty#cuda()
+
+    bt = getBestTrial(tx, ty, const)
+    #print(tx)
+    #print(ty)
+
+    pl = paramlist
+    ub = []
+    lb = []
+
+    for i in pl:
+        ub.append(i["bounds"][1])
+        lb.append(i["bounds"][0])
+    # ["phs <= -0.01",  "phs >= -95", "gx >= 45000000"]
+    gp = None
+
+    NUM_OUTPUTS = 3
+    pt = ScalarizedPosteriorTransform(torch.cat([torch.tensor([1],
+        dtype=torch.float32), torch.zeros(NUM_OUTPUTS-1, dtype=torch.float32)]))
+
+
+    print("MACE TIME.")
+    while trial - fin < N_MACE:
+        st0 = time.time()
+        mll, gp  = update_model(tx, ty, old_model=gp)
+
+        res = doMace(gp, pt, torch.max(ty[:, 0]), lb, ub, const)
+
+        st1 = time.time()
+
+        print(f"time setup: {st1-st0}")
+        #print(res.X)
+        
+        nx = selectRandSamples(res.X, 128)
+        #nx = res.X
+        nx = convertType(nx, paramlist)
+        #print(nx)
+        for i in nx:
+            dct = listToParams(i, paramlist)
+            ny = doTrials(dct)
+            #print(i, ny)
+            tx, ty = update_data(tx, ty, new_x = i, new_y = ny)
+            bt = getBestTrial(tx, ty, const)
+            print("MACE trial: ", trial, bt)
+            print(i, ny)
+            
+            appendToResults(f"res_{rs}.txt", " ".join([str(i.item()) for i in bt[0]] + [str(i.item()) for i in bt[1]]) + "\n")
+            trial += 1
+        #print(tx.is_cuda)
+
+    print(getBestTrial(tx, ty, const))
+    torch.cuda.empty_cache()

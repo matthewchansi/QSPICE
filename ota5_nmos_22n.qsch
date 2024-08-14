@@ -3,7 +3,7 @@
     «symbol NMOSB
       «type: MN»
       «description: Monolithic N-Channel MOSFET Transistor»
-      «library file: C:\Users\matthewchansi\Downloads\cmos\cmos_22nm_HP.txt»
+      «library file: C:\Users\Steam\Documents\QSPICE\cmos_22nm_hp.txt»
       «shorted pins: true»
       «line (100,200) (100,150) 0 0 0x1000000 -1 -1»
       «line (100,-150) (100,-200) 0 0 0x1000000 -1 -1»
@@ -27,7 +27,7 @@
     «symbol PMOSB
       «type: MP»
       «description: Monolithic P-Channel MOSFET Transistor»
-      «library file: C:\Users\matthewchansi\Downloads\cmos\cmos_22nm_HP.txt»
+      «library file: C:\Users\Steam\Documents\QSPICE\cmos_22nm_hp.txt»
       «shorted pins: true»
       «line (100,200) (100,150) 0 0 0x1000000 -1 -1»
       «line (100,-150) (100,-200) 0 0 0x1000000 -1 -1»
@@ -51,7 +51,7 @@
     «symbol NMOSB
       «type: MN»
       «description: Monolithic N-Channel MOSFET Transistor»
-      «library file: C:\Users\matthewchansi\Downloads\cmos\cmos_22nm_HP.txt»
+      «library file: C:\Users\Steam\Documents\QSPICE\cmos_22nm_hp.txt»
       «shorted pins: true»
       «line (100,200) (100,150) 0 0 0x1000000 -1 -1»
       «line (100,-150) (100,-200) 0 0 0x1000000 -1 -1»
@@ -75,7 +75,7 @@
     «symbol PMOSB
       «type: MP»
       «description: Monolithic P-Channel MOSFET Transistor»
-      «library file: C:\Users\matthewchansi\Downloads\cmos\cmos_22nm_HP.txt»
+      «library file: C:\Users\Steam\Documents\QSPICE\cmos_22nm_hp.txt»
       «shorted pins: true»
       «line (100,200) (100,150) 0 0 0x1000000 -1 -1»
       «line (100,-150) (100,-200) 0 0 0x1000000 -1 -1»
@@ -99,7 +99,7 @@
     «symbol NMOSB
       «type: MN»
       «description: Monolithic N-Channel MOSFET Transistor»
-      «library file: C:\Users\matthewchansi\Downloads\cmos\cmos_22nm_HP.txt»
+      «library file: C:\Users\Steam\Documents\QSPICE\cmos_22nm_hp.txt»
       «shorted pins: true»
       «line (100,200) (100,150) 0 0 0x1000000 -1 -1»
       «line (100,-150) (100,-200) 0 0 0x1000000 -1 -1»
@@ -140,7 +140,7 @@
     «symbol NMOSB
       «type: MN»
       «description: Monolithic N-Channel MOSFET Transistor»
-      «library file: C:\Users\matthewchansi\Downloads\cmos\cmos_22nm_HP.txt»
+      «library file: C:\Users\Steam\Documents\QSPICE\cmos_22nm_hp.txt»
       «shorted pins: true»
       «line (100,200) (100,150) 0 0 0x1000000 -1 -1»
       «line (100,-150) (100,-200) 0 0 0x1000000 -1 -1»
