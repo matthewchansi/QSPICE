@@ -14,8 +14,8 @@ C1 out 0 C=1p
 .meas cur param I(V1)
 .ac dec 20 0 10G
 .meas gx find frequency when mag(v(out)/v(in))=1
-.op
-.param M1_L=186.83n M3_L=139.93n M5_L=171.16n M1_W=37209.8n M3_W=6633.9n M6_W=15283.56n M5_WM=20
+//.op
+.param M1_L=2.316467599997469e-07 M3_L=9.861962232880977e-07 M5_L=4.6129260077291526e-06 M1_W=3.114598826154457e-05 M3_W=4.051872295505026e-05 M6_W=4.122718105716633e-07 M5_WM=16.0
 .meas phs find phase(v(out)/v(in)) when mag(v(out)/v(in))=1
 .lib C:\Users\Steam\Documents\QSPICE\cmos_22nm_hp.txt
 .end

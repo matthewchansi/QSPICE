@@ -1,8 +1,8 @@
 .meas gain max db(v(out)/v(in)):
-     (   14.9185,   27.2628)
+     (   47.0575,   26.9552)
 .meas cur param i(v1):
-     (2.91425e-05,5.24546e-05)
+     (-1.04831e-06,6.74631e-05)
 .meas gx find frequency when mag(v(out)/v(in))=1:
-     (5.58029e+07,         0)
+     (1.09638e+07,         0)
 .meas phs find phase(v(out)/v(in)) when mag(v(out)/v(in))=1:
-     (  -87.5769,         0)
+     (  -116.515,         0)

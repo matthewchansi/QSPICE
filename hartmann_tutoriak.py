@@ -22,17 +22,14 @@ from botorch.acquisition.analytic import (UpperConfidenceBound, ExpectedImprovem
 from botorch.models.model import Model
 from botorch.utils import t_batch_mode_transform
 from botorch.acquisition.objective import ScalarizedPosteriorTransform, PosteriorTransform
-from botorch.posteriors.gpytorch import GPyTorchPosterior
-from botorch.posteriors.posterior_list import PosteriorList  # pragma: no cover
-from gpytorch.distributions import MultitaskMultivariateNormal, MultivariateNormal
-from botorch.sampling.normal import SobolQMCNormalSampler
 from botorch.utils.probability.utils import (
     ndtr as Phi,
 )
 from botorch.models.transforms.outcome import Standardize
 from botorch.models.transforms.input import Normalize
+from multitask import DKL_GP
 
-class ProbabilityOfFeasibility(AnalyticAcquisitionFunction):
+class LogProbabilityOfFeasibility(AnalyticAcquisitionFunction):
     r"""Probability of Feasibility.
 
     """
@@ -72,6 +69,7 @@ class ProbabilityOfFeasibility(AnalyticAcquisitionFunction):
         """
         means, sigmas = self._mean_and_sigma(X)  # (b) x 1 + (m = num constraints)
         log_prob_feas = _compute_log_prob_feas(self, means=means, sigmas=sigmas)
+        #print(log_prob_feas.exp().shape)
         return log_prob_feas.exp()
     
 class EnsembleAcquisitionFunction(AnalyticAcquisitionFunction):
@@ -120,7 +118,11 @@ class EnsembleAcquisitionFunction(AnalyticAcquisitionFunction):
         mean, sigma = self._mean_and_sigma(X)
         u = _scaled_improvement(mean, sigma, self.best_f, self.maximize)
         #print(Phi(u).shape)
-        o = torch.stack((sigma * _ei_helper(u), Phi(u), (mean if self.maximize else -mean) + self.beta.sqrt() * sigma))
+        # EI, PI, UCB
+        ei = sigma * _ei_helper(u)
+        pi = Phi(u)
+        ucb = mean + self.beta.sqrt() * sigma
+        o = torch.stack((ei, pi, ucb))
         return o
 
 class MyProblemEnsemble(Problem):
@@ -132,9 +134,9 @@ class MyProblemEnsemble(Problem):
 
     def _evaluate(self, x, out, *args, **kwargs):
         xt = torch.from_numpy(np.float32(np.expand_dims(x, axis=1)))
-        const_mul = self.const_fn(xt)
+        const_log = self.const_fn(xt)
+        const_mul  = torch.pow(const_log.exp(), 2)
         o = self.my_fn(xt) 
-
         o = o * const_mul * -1
         z = o.detach().numpy().T
         #print(z.shape)
@@ -144,13 +146,13 @@ def doMaceEnsemble(gp, max_y, lb, ub, const, randseed = 1):
     
     pt = ScalarizedPosteriorTransform(torch.cat([torch.tensor([1],
         dtype=torch.float32), torch.zeros(gp.num_outputs -1, dtype=torch.float32)]))
-    PF = ProbabilityOfFeasibility(gp, objective_index=0, constraints=const) # index, lower bound, upper bound.
+    PF = LogProbabilityOfFeasibility(gp, objective_index=0, constraints=const) # index, lower bound, upper bound.
     ensemble = EnsembleAcquisitionFunction(gp, best_f=max_y, beta = getBeta(dims = len(ub)), posterior_transform=pt)
     problem = MyProblemEnsemble(len(lb), 3, ensemble, PF, xl=lb, xu=ub)
 
     algorithm = NSGA2(pop_size=100)
 
-    res = minimize(problem, algorithm, ('n_gen', 200), verbose=True, seed=randseed)
+    res = minimize(problem, algorithm, ('n_gen', 100), verbose=True, seed=randseed)
     return res
 
 def selectRandSamples(batch, batchsz):
@@ -328,7 +330,7 @@ def getBestTrial(_tx, _ty, _const):
     #print(_tx)
     old_shape_x = _tx.shape
     old_shape_y = _ty.shape
-    _filter = torch.ones(len(_tx), dtype=torch.bool, device=_tx.get_device())
+    _filter = torch.ones(len(_tx), dtype=torch.bool, device=_tx.device)
     for i in _const:
         # apply upper, lower bounds to each const.
         # if the bound is none, don't apply the bound.
@@ -377,4 +379,4 @@ def doTrials(params, mul=1E9):
     if phs == None or math.isnan(phs): phs = -180
     return torch.tensor([gain, phs, gx])
 
-torch.set_default_dtype(torch.float64)
+# torch.set_default_dtype(torch.float64)
